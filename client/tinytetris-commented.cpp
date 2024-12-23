@@ -1,15 +1,15 @@
 #include <ctime>
-#include <curses.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
-#include <websocketpp/config/asio_no_tls_client.hpp>
-#include <websocketpp/client.hpp>
-#include <json/json.h>
+#include "websocketpp/config/asio_no_tls.hpp"
+#include "websocketpp/client.hpp"
+#include <jsoncpp/json/json.h>
 #include <thread>
 #include <iostream>
+#include <curses.h>
 
-typedef websocketpp::client<websocketpp::config::asio_client> client;
+typedef websocketpp::client<websocketpp::config::asio> client;
 client ws_client;
 websocketpp::connection_hdl connection_hdl;
 
@@ -100,16 +100,18 @@ void frame() {
 }
 
 // set the value fo the board for a particular (x,y,r) piece
-void set_piece(int x, int y, int r, int v) {
+int set_piece(int x, int y, int r, int v) {
   for (int i = 0; i < 8; i += 2) {
     board[NUM(r, i * 2) + y][NUM(r, (i * 2) + 2) + x] = v;
   }
+  return 0;
 }
 
 // move a piece from old (p*) coords to new
 int update_piece() {
   set_piece(px, py, pr, 0);
   set_piece(px = x, py = y, pr = r, p + 1);
+  return 0;
 }
 
 // remove line(s) from the board if they're full
