@@ -3,10 +3,19 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
+#include <websocketpp/config/asio_no_tls_client.hpp>
+#include <websocketpp/client.hpp>
+#include <json/json.h>
+#include <thread>
+#include <iostream>
+
+typedef websocketpp::client<websocketpp::config::asio_client> client;
+client ws_client;
+websocketpp::connection_hdl connection_hdl;
 
 // block layout is: {w-1,h-1}{x0,y0}{x1,y1}{x2,y2}{x3,y3} (two bits each)
 int x = 431424, y = 598356, r = 427089, px = 247872, py = 799248, pr,
-    c = 348480, p = 615696, tick, board[20][10],
+    c = 348480, p = 615696, tick, board[20][10], opponent_board[20][10],
     block[7][4] = {{x, y, x, y},
                    {r, p, r, p},
                    {c, c, c, c},
@@ -19,6 +28,47 @@ int x = 431424, y = 598356, r = 427089, px = 247872, py = 799248, pr,
 // extract a 2-bit number from a block entry
 int NUM(int x, int y) { return 3 & block[p][x] >> y; }
 
+// send the current game state to the server
+void send_game_state() {
+  Json::Value state;
+  state["type"] = "update";
+  state["x"] = x;
+  state["y"] = y;
+  state["r"] = r;
+  state["score"] = score;
+
+  Json::Value board_array(Json::arrayValue);
+  for (int i = 0; i < 20; ++i) {
+    Json::Value row(Json::arrayValue);
+    for (int j = 0; j < 10; ++j) {
+      row.append(board[i][j]);
+    }
+    board_array.append(row);
+  }
+  state["board"] = board_array;
+
+  std::string message = Json::writeString(Json::StreamWriterBuilder(), state);
+  ws_client.send(connection_hdl, message, websocketpp::frame::opcode::text);
+}
+
+// handle messages from the server
+void on_message(websocketpp::connection_hdl hdl, client::message_ptr msg) {
+  Json::Value data;
+  Json::CharReaderBuilder builder;
+  std::istringstream stream(msg->get_payload());
+  std::string errs;
+  if (Json::parseFromStream(builder, stream, &data, &errs)) {
+    if (data["type"].asString() == "update") {
+      const Json::Value &board = data["board"];
+      for (int i = 0; i < 20; ++i) {
+        for (int j = 0; j < 10; ++j) {
+          opponent_board[i][j] = board[i][j].asInt();
+        }
+      }
+    }
+  }
+}
+
 // create a new piece, don't remove old one (it has landed and should stick)
 void new_piece() {
   y = py = 0;
@@ -27,14 +77,21 @@ void new_piece() {
   x = px = rand() % (10 - NUM(r, 16));
 }
 
-// draw the board and score
+// draw the board, opponent board, and score
 void frame() {
   for (int i = 0; i < 20; i++) {
-    move(1 + i, 1); // otherwise the box won't draw
+    move(1 + i, 1); // current player board
     for (int j = 0; j < 10; j++) {
       board[i][j] && attron(262176 | board[i][j] << 8);
       printw("  ");
       attroff(262176 | board[i][j] << 8);
+    }
+
+    move(1 + i, 25); // opponent player board
+    for (int j = 0; j < 10; j++) {
+      opponent_board[i][j] && attron(262176 | opponent_board[i][j] << 8);
+      printw("  ");
+      attroff(262176 | opponent_board[i][j] << 8);
     }
   }
   move(21, 1);
@@ -138,6 +195,7 @@ void runloop() {
     }
     update_piece();
     frame();
+    send_game_state();
   }
 }
 
@@ -146,16 +204,34 @@ int main() {
   srand(time(0));
   initscr();
   start_color();
-  // colours indexed by their position in the block
+
+  // WebSocket 연결 초기화
+  ws_client.init_asio();
+  ws_client.set_message_handler(on_message);
+
+  websocketpp::lib::error_code ec;
+  client::connection_ptr con = ws_client.get_connection("ws://localhost:8080/ws", ec);
+  if (ec) {
+    std::cout << "Connection error: " << ec.message() << std::endl;
+    return -1;
+  }
+  ws_client.connect(con);
+  connection_hdl = con->get_handle();
+
+  std::thread ws_thread([&]() { ws_client.run(); });
+
+  // 기존 초기화
   for (int i = 1; i < 8; i++) {
     init_pair(i, i, 0);
   }
   new_piece();
-  resizeterm(22, 22);
+  resizeterm(22, 44); // 상대방 필드 공간 추가
   noecho();
   timeout(0);
   curs_set(0);
   box(stdscr, 0, 0);
   runloop();
   endwin();
+  ws_thread.join();
+  return 0;
 }
