@@ -3,8 +3,8 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
-#include "websocketpp/websocketpp/config/asio_no_tls_client.hpp"
-#include "websocketpp/client.hpp"
+#include <websocketpp/config/asio_no_tls_client.hpp>
+#include <websocketpp/client.hpp>
 #include <json/json.h>
 #include <thread>
 #include <iostream>
